@@ -3,44 +3,106 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
-	"github.com/silviomfa/go-cloud-aws/interfaces"
+	"github.com/google/uuid"
+	coreinterfaces "github.com/silviomfa/go-cloud-core/pkg/interfaces"
 )
 
 // ConvertToGenericEvent converte um evento AWS para o formato genérico
-func ConvertToGenericEvent(ctx context.Context, rawEvent json.RawMessage) (interfaces.Event, error) {
-	// Evento padrão
-	event := interfaces.Event{}
-
+func ConvertToGenericEvent(ctx context.Context, eventBytes json.RawMessage) (coreinterfaces.Event, error) {
+	log.Printf("Convertendo evento AWS para formato genérico: %s", string(eventBytes))
+	
+	// Criar evento genérico com valores padrão
+	event := coreinterfaces.Event{
+		ID:        uuid.New().String(),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Data:      eventBytes,
+		Metadata:  make(map[string]interface{}),
+	}
+	
 	// Tentar identificar o tipo de evento
-	var apiGatewayEvent events.APIGatewayProxyRequest
-	if err := json.Unmarshal(rawEvent, &apiGatewayEvent); err == nil && apiGatewayEvent.RequestContext.RequestID != "" {
-		// É um evento de API Gateway
-		return convertAPIGatewayEvent(apiGatewayEvent), nil
+	var rawEvent map[string]interface{}
+	if err := json.Unmarshal(eventBytes, &rawEvent); err != nil {
+		log.Printf("Erro ao decodificar evento AWS: %v", err)
+		return event, nil // Retornar evento com dados brutos
 	}
-
-	var sqsEvent events.SQSEvent
-	if err := json.Unmarshal(rawEvent, &sqsEvent); err == nil && len(sqsEvent.Records) > 0 {
-		// É um evento de SQS
-		return convertSQSEvent(sqsEvent), nil
+	
+	// Verificar se é um evento API Gateway
+	if _, ok := rawEvent["httpMethod"]; ok {
+		event.Type = "http.request"
+		event.Source = "api"
+		
+		// Extrair ID da requisição se disponível
+		if requestContext, ok := rawEvent["requestContext"].(map[string]interface{}); ok {
+			if requestID, ok := requestContext["requestId"].(string); ok {
+				event.ID = requestID
+			}
+		}
+		
+		// Adicionar pathParameters aos metadados
+		if pathParams, ok := rawEvent["pathParameters"].(map[string]interface{}); ok {
+			event.Metadata["pathParameters"] = pathParams
+		}
+		
+		// Adicionar queryStringParameters aos metadados
+		if queryParams, ok := rawEvent["queryStringParameters"].(map[string]interface{}); ok {
+			event.Metadata["queryStringParameters"] = queryParams
+		}
+		
+		// Adicionar body aos metadados
+		if body, ok := rawEvent["body"].(string); ok {
+			event.Metadata["body"] = body
+		}
+		
+		// Adicionar httpMethod aos metadados
+		if method, ok := rawEvent["httpMethod"].(string); ok {
+			event.Metadata["httpMethod"] = method
+		}
+		
+		log.Printf("Evento identificado como API Gateway: ID=%s", event.ID)
+		return event, nil
 	}
-
-	// Se não conseguir identificar, retorna o evento bruto
+	
+	// Verificar se é um evento SQS
+	if records, ok := rawEvent["Records"].([]interface{}); ok {
+		for _, record := range records {
+			if recordMap, ok := record.(map[string]interface{}); ok {
+				if eventSource, ok := recordMap["eventSource"].(string); ok && strings.Contains(strings.ToLower(eventSource), "sqs") {
+					event.Type = "sqs.message"
+					event.Source = "queue"
+					
+					// Extrair ID da mensagem se disponível
+					if messageID, ok := recordMap["messageId"].(string); ok {
+						event.ID = messageID
+					}
+					
+					log.Printf("Evento identificado como SQS: ID=%s", event.ID)
+					return event, nil
+				}
+			}
+		}
+	}
+	
+	// Se não conseguiu identificar o tipo, usar valores genéricos
 	event.Type = "unknown"
-	event.Data = rawEvent
-
+	event.Source = "aws"
+	log.Printf("Tipo de evento não identificado: %s", event.Type)
+	
 	return event, nil
 }
 
 // Converter evento de API Gateway
-func convertAPIGatewayEvent(apiEvent events.APIGatewayProxyRequest) interfaces.Event {
-	event := interfaces.Event{
+func convertAPIGatewayEvent(apiEvent events.APIGatewayProxyRequest) coreinterfaces.Event {
+	event := coreinterfaces.Event{
 		ID:        apiEvent.RequestContext.RequestID,
 		Source:    "api",
 		Type:      "http.request",
 		RequestID: apiEvent.RequestContext.RequestID,
-		Metadata: map[string]string{
+		Metadata: map[string]interface{}{
 			"method":     apiEvent.HTTPMethod,
 			"path":       apiEvent.Path,
 			"sourceIP":   apiEvent.RequestContext.Identity.SourceIP,
@@ -55,8 +117,8 @@ func convertAPIGatewayEvent(apiEvent events.APIGatewayProxyRequest) interfaces.E
 }
 
 // Converter evento de SQS
-func convertSQSEvent(sqsEvent events.SQSEvent) interfaces.Event {
-	event := interfaces.Event{
+func convertSQSEvent(sqsEvent events.SQSEvent) coreinterfaces.Event {
+	event := coreinterfaces.Event{
 		Source: "sqs",
 		Type:   "message.received",
 	}
@@ -64,7 +126,7 @@ func convertSQSEvent(sqsEvent events.SQSEvent) interfaces.Event {
 	if len(sqsEvent.Records) > 0 {
 		event.ID = sqsEvent.Records[0].MessageId
 		event.Data = []byte(sqsEvent.Records[0].Body)
-		event.Metadata = map[string]string{
+		event.Metadata = map[string]interface{}{
 			"queueUrl": sqsEvent.Records[0].EventSourceARN,
 		}
 	}
@@ -73,31 +135,18 @@ func convertSQSEvent(sqsEvent events.SQSEvent) interfaces.Event {
 }
 
 // ConvertToAWSResponse converte uma resposta genérica para o formato AWS
-func ConvertToAWSResponse(response interface{}) interface{} {
-	// Se já for uma resposta de API Gateway, retornar diretamente
-	if apiResp, ok := response.(events.APIGatewayProxyResponse); ok {
-		return apiResp
+func ConvertToAWSResponse(response *coreinterfaces.Response) interface{} {
+	// Converter para resposta API Gateway
+	apiResponse := events.APIGatewayProxyResponse{
+		StatusCode: response.StatusCode,
+		Headers:    make(map[string]string),
+		Body:       string(response.Body),
 	}
-
-	// Tentar converter para JSON
-	jsonBytes, err := json.Marshal(response)
-	if err != nil {
-		// Em caso de erro, retornar erro 500
-		return events.APIGatewayProxyResponse{
-			StatusCode: 500,
-			Body:       `{"error": "Internal Server Error"}`,
-			Headers: map[string]string{
-				"Content-Type": "application/json",
-			},
-		}
+	
+	// Copiar headers
+	for k, v := range response.Headers {
+		apiResponse.Headers[k] = v
 	}
-
-	// Retornar como resposta de API Gateway
-	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
-		Body:       string(jsonBytes),
-		Headers: map[string]string{
-			"Content-Type": "application/json",
-		},
-	}
+	
+	return apiResponse
 }

@@ -1,8 +1,6 @@
 module github.com/silviomfa/go-cloud-aws
 
-go 1.22
-
-toolchain go1.24.1
+go 1.24.1
 
 require (
 	github.com/aws/aws-lambda-go v1.46.0
@@ -12,6 +10,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.30.4
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.51.4
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.31.2
+	github.com/google/uuid v1.6.0
+	github.com/silviomfa/go-cloud-core v0.0.0
 )
 
 require (
@@ -34,3 +34,6 @@ require (
 	github.com/aws/smithy-go v1.22.2 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 )
+
+// Adicionar replace para desenvolvimento local
+replace github.com/silviomfa/go-cloud-core => ../go-cloud-core

@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 )
 
-// Provider implementa a interface interfaces.CloudProvider para AWS
+// Provider implementa a interface coreinterfaces.CloudProvider para AWS
 type Provider struct {
 	config aws.Config
 	region string
@@ -62,7 +62,7 @@ func NewProvider() (*Provider, error) {
 
 // GetName retorna o nome do provedor
 func (p *Provider) GetName() string {
-	return "AWS"
+	return "aws"
 }
 
 // GetRegion retorna a região configurada

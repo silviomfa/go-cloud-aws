@@ -7,18 +7,18 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/silviomfa/go-cloud-aws/interfaces"
+	coreinterfaces "github.com/silviomfa/go-cloud-core/pkg/interfaces"
 	"github.com/silviomfa/go-cloud-aws/provider"
 )
 
-// SQSProvider implementa a interface interfaces.MessagingProvider para SQS
+// SQSProvider implementa a interface coreinterfaces.MessagingProvider para SQS
 type SQSProvider struct {
 	client   *sqs.Client
 	provider *provider.Provider
 }
 
 // NewSQSProvider cria um novo provedor de mensageria SQS
-func NewSQSProvider(cloudProvider interfaces.CloudProvider) (*SQSProvider, error) {
+func NewSQSProvider(cloudProvider coreinterfaces.CloudProvider) (*SQSProvider, error) {
 	awsProvider, ok := cloudProvider.(*provider.Provider)
 	if !ok {
 		return nil, fmt.Errorf("provedor não é do tipo AWS")
@@ -57,7 +57,7 @@ func (p *SQSProvider) SendMessage(ctx context.Context, queueName string, message
 }
 
 // ReceiveMessages implementa a recepção de mensagens de uma fila SQS
-func (p *SQSProvider) ReceiveMessages(ctx context.Context, queueName string, maxMessages int) ([]interfaces.Message, error) {
+func (p *SQSProvider) ReceiveMessages(ctx context.Context, queueName string, maxMessages int) ([]coreinterfaces.Message, error) {
 	output, err := p.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 		QueueUrl:            &queueName,
 		MaxNumberOfMessages: int32(maxMessages),
@@ -66,9 +66,9 @@ func (p *SQSProvider) ReceiveMessages(ctx context.Context, queueName string, max
 		return nil, fmt.Errorf("erro ao receber mensagens: %w", err)
 	}
 
-	messages := make([]interfaces.Message, len(output.Messages))
+	messages := make([]coreinterfaces.Message, len(output.Messages))
 	for i, msg := range output.Messages {
-		messages[i] = interfaces.Message{
+		messages[i] = coreinterfaces.Message{
 			ID:            *msg.MessageId,
 			Body:          []byte(*msg.Body),
 			ReceiptHandle: *msg.ReceiptHandle,
